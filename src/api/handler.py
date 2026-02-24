@@ -4,8 +4,22 @@ import logging as log
 from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
+from rapidfuzz import fuzz, process
 
-from src.utils.models import ConversationRequestMessage, ConversationResponseMessage, FlexMessage
+from src.utils.models import (
+    ConversationRequestMessage,
+    ConversationResponseMessage,
+    ConversationResultMessage,
+    FlexMessage,
+)
+
+questions = {
+    "Thank you for joining me": "q1",
+    "First, how did you find your care services today": "q1",
+    "How could we provide better services next time": "q2",
+    "What do you like most about the Harvard Medicine Family Van": "q3",
+    "Is there anything else you'd like to share with us": "q4",
+}
 
 
 async def handle_message(ws: WebSocket, message: str) -> None:
@@ -19,22 +33,39 @@ async def handle_message(ws: WebSocket, message: str) -> None:
     try:
         # Parse as flexible message
         msg = FlexMessage.model_validate_json(message)
-        log.info(f"Received message type: {msg.name}")
-        log.info(msg)
 
-        if msg.name == "conversationRequest":
-            request = ConversationRequestMessage.model_validate_json(message)
-            await handle_conversation_request(ws, request)
+        if msg.name == "conversationResult":
+            conversation_result = ConversationResultMessage.model_validate_json(message)
+            log.info(f"Received conversation_result {conversation_result}")
+            await handle_conversation_result(ws, conversation_result)
         else:
             # Handle other message types
-            log.info(f"Received message type: {msg.name}")
+            log.info(f"Received message {msg}")
 
     except Exception as e:
         log.error(f"Unrecognized message: {message}")
         log.error(f"Error: {e}")
 
 
-async def handle_conversation_request(ws: WebSocket, request: ConversationRequestMessage) -> None:
+def match_question(input_sentence: str, threshold: int = 70):
+    """
+    Returns the key (ID) of the best-matching question if score >= threshold.
+    Otherwise returns None.
+    """
+
+    # Create a list of question texts
+    question_texts = list(questions.keys())
+
+    # Get best match using RapidFuzz (similar to fuzzywuzzy)
+    best_match, score, idx = process.extractOne(input_sentence, question_texts, scorer=fuzz.ratio)
+
+    if score >= threshold:
+        return questions[best_match]  # return the q1/q2/q3/q4 identifier
+    else:
+        return None
+
+
+async def handle_conversation_result(ws: WebSocket, request: ConversationRequestMessage) -> None:
     """
     Handle conversation request message
 
@@ -42,37 +73,33 @@ async def handle_conversation_request(ws: WebSocket, request: ConversationReques
         ws: WebSocket connection
         request: Parsed conversation request
     """
-    log.info(f"Conv request: {request.get_input_text()}")
+    input_text = request.get_input_text()
+    if not input_text:
+        return
 
-    # Get input text
-    input_text = request.get_input_text() or ""
+    # Try to match question number
+    qnum = match_question(input_text)
+    log.info(f"Conv result: {request.get_input_text()} {qnum=}")
+    if qnum:
+        url = f"https://clinicfeedback.org/images/en_{qnum}.png"
 
-    # Create base response
-    response_body = {
-        "input": {"text": input_text},
-        "output": {"text": f"Echo: {input_text}"},
-        "variables": {},
-    }
-
-    # Handle welcome/init message
-    if request.is_init_request():
-        response_body["output"]["text"] = "Hello there!"
-
-    # Handle fallback example
-    if input_text.lower().startswith("why"):
-        response_body["output"]["text"] = "I do not know how to answer that"
-        response_body["fallback"] = True
-
-    # Handle content cards example
-    if input_text.lower() == "cat":
-        response_body["output"]["text"] = "Here is a cat @showcards(cat)"
-        response_body["variables"]["public-cat"] = {
-            "component": "image",
-            "data": {"alt": "A cute kitten", "url": "https://i.imgur.com/s7Erio7.jpeg"},
+        # Build WS response
+        response_body = {
+            "input": {"text": input_text},
+            "output": {"text": ""},  # assistant says nothing; image will show separately
+            "variables": {
+                qnum: {
+                    "component": "image",
+                    "data": {
+                        "alt": qnum,
+                        "url": url,
+                    },
+                }
+            },
         }
 
-    # Send response
-    await send_conversation_response(ws, response_body)
+        await send_conversation_response(ws, response_body)
+        return
 
 
 async def send_conversation_response(ws: WebSocket, response_body: Dict[str, Any]) -> None:
@@ -91,4 +118,4 @@ async def send_conversation_response(ws: WebSocket, response_body: Dict[str, Any
     }
 
     await ws.send_text(json.dumps(message))
-    log.info(f"Sent response: {response_body['output']['text']}")
+    log.info(f"Sent response: {response_body['variables']}")

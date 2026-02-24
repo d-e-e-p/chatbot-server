@@ -1,4 +1,5 @@
 import json
+import logging as log
 
 import fastapi
 import pytest
@@ -18,7 +19,7 @@ def load_recording(recording_file):
 @pytest.mark.parametrize(
     "recording",
     [
-        "trace/session_20251206_221037.jsonl",
+        "trace/test.jsonl",
     ],
 )
 def test_websocket_with_recording(recording):
@@ -31,7 +32,8 @@ def test_websocket_with_recording(recording):
 
         # Send all received messages
         for record in records:
-            if record["direction"] == "received":
+            # log.info(f"{record=}")
+            if record["direction"] == "received" or record["direction"] == "recv":
                 websocket.send_text(record["data"])
 
                 # Check response if available

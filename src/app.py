@@ -10,7 +10,12 @@ from src.utils.models import FlexMessage
 from src.utils.ws_recorder import WebSocketRecorder
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(funcName)s: %(message)s",
+)
+log = logging.getLogger(__name__)
 recorder = WebSocketRecorder()
 
 app = FastAPI()
@@ -19,7 +24,7 @@ app = FastAPI()
 @app.websocket("/")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    logger.info("WebSocket connection accepted")
+    log.info("WebSocket connection accepted")
     await recorder.start()
 
     try:
@@ -33,7 +38,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await handle_message(websocket, data)
 
             except ValidationError as e:
-                logger.error(f"Validation error: {e}")
+                log.error(f"Validation error: {e}")
                 error_response = {
                     "status": "error",
                     "message": "Invalid message format",
@@ -42,13 +47,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json(error_response)
 
             except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}")
+                log.error(f"JSON decode error: {e}")
                 await websocket.send_json({"status": "error", "message": "Invalid JSON"})
 
     except WebSocketDisconnect:
-        logger.info("Client disconnected")
+        log.info("Client disconnected")
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
+        log.error(f"WebSocket error: {e}")
         raise
 
     finally:
